@@ -27,6 +27,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
+from contextlib import redirect_stdout
 
 from . import __version__  # noqa: F401 — used in except ValueError branch
 from ._compat import FastMCP
@@ -47,7 +48,6 @@ from .tools.share import register_share_tools
 from .tools.task import register_task_tools
 from .tools.transfer import register_transfer_tools
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -55,7 +55,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("openlist-mcp")
 
-# Create MCP server instance
 mcp = FastMCP(
     name="openlist",
     instructions=(
@@ -67,7 +66,6 @@ mcp = FastMCP(
     ),
 )
 
-# Group → registration function mapping (server-only, kept here)
 _REGISTER_FUNC: dict[str, Callable[[FastMCP], None]] = {
     "fs": register_fs_tools,
     "transfer": register_transfer_tools,
@@ -77,7 +75,6 @@ _REGISTER_FUNC: dict[str, Callable[[FastMCP], None]] = {
     "advanced": register_advanced_tools,
 }
 
-# Groups that always load (auth) + their count
 AUTH_COUNT = group_count("auth")
 
 
@@ -85,8 +82,6 @@ def register_all_tools() -> None:
     """Register tool groups with the MCP server, filtered by OPENLIST_SKILLS."""
     config = get_config()
     selected = resolve_skills(config.skills)
-
-    # Auth/public tools are always loaded (needed for any interaction)
     register_public_tools(mcp)
     register_auth_tools(mcp)
 
@@ -103,9 +98,7 @@ def register_all_tools() -> None:
 
 
 def _banner_skills(raw_skills: str) -> tuple[int, list[str], str, str]:
-    """Build skill summary for the missing-config banner.
-    Returns (total, group_details, skills_line, upgrade_notice).
-    """
+    """Build skill summary for the missing-config banner."""
     selected = resolve_skills(raw_skills)
     total = AUTH_COUNT + sum(group_count(g) for g in selected if g in SKILL_GROUP_META)
     group_details = []
@@ -198,7 +191,11 @@ def main() -> None:
         total,
     )
 
-    register_all_tools()
+    # stdout is reserved for the MCP stdio protocol. Keep startup hooks and
+    # third-party registration code from corrupting that stream with banners
+    # or diagnostic prints; logging is already configured for stderr.
+    with redirect_stdout(sys.stderr):
+        register_all_tools()
     mcp.run()
 
 
